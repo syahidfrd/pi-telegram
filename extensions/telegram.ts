@@ -52,7 +52,33 @@ async function api(method: string, params: Record<string, unknown>) {
 // ---------- Markdown -> Telegram HTML ----------
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+// Telegram has no tables: each Markdown table row becomes a small card (first column bold, then "Header: value").
+export function tablesToCards(md: string): string {
+  const lines = md.split("\n");
+  const out: string[] = [];
+  const cells = (l: string) => l.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+  const isSep = (l: string) => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l);
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim().startsWith("|") && i + 1 < lines.length && isSep(lines[i + 1])) {
+      const head = cells(lines[i]);
+      i += 2;
+      const cards: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith("|")) {
+        const row = cells(lines[i]);
+        const title = row[0]?.replace(/\*\*/g, "") || "";
+        const rest = row.slice(1).map((v, j) => (v && v !== "-" ? `${head[j + 1] || ""}: ${v}` : "")).filter(Boolean);
+        cards.push([`**${title}**`, ...rest].join("\n"));
+        i++;
+      }
+      i--;
+      out.push(cards.join("\n\n"));
+    } else out.push(lines[i]);
+  }
+  return out.join("\n");
+}
+
 export function mdToHtml(md: string): string {
+  md = tablesToCards(md);
   const keep: string[] = [];
   const stash = (h: string) => `\u0000${keep.push(h) - 1}\u0000`;
   let s = md.replace(/```[^\n]*\n?([\s\S]*?)```/g, (_m, code) => stash(`<pre>${esc(code.replace(/\n$/, ""))}</pre>`));

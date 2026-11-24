@@ -9,7 +9,7 @@ Telegram bot land in that session as if you typed them, and pi's answer comes ba
 - **Voice notes**: transcribed with any OpenAI-compatible speech-to-text API (Groq Whisper by default).
 - **Photos**: saved to disk, and optionally read by a vision model, so text-only models (DeepSeek, GLM) can still work with receipts, screenshots and posters.
 - **Files** (CSV, PDF, Excel, ...): saved to an inbox folder; pi is told the path and takes it from there.
-- **Formatted answers**: pi's Markdown is converted to Telegram formatting (bold, code, lists, links).
+- **Formatted answers**: pi's Markdown is converted to Telegram formatting (bold, code, lists, links); tables become readable cards, since Telegram has no tables.
 - **Optional `generate_image` tool**: pi can create an image (OpenAI Images API) and send it to you.
 - **Scheduler (proactive pi)**: ask pi to do something regularly ("every Monday 8am, summarise last week's sales from orders.csv") and it schedules it with cron. Each run happens in your pi session and the result lands in Telegram. `/schedules` lists them, `/unschedule <id>` removes one.
 - `/stop` aborts the current run.
