@@ -4,6 +4,7 @@
 // is busy); when a run started from Telegram ends, pi's last answer goes back to the chat as formatted
 // text. Photos, files and voice notes are saved to an inbox folder; voice notes and images can be
 // transcribed by any OpenAI-compatible API. Optional generate_image tool (OpenAI Images).
+// Scheduler: pi can schedule recurring tasks (cron) that run in this session and report to Telegram.
 //
 // The extension stays idle unless PI_TELEGRAM_BOT_TOKEN is set, so installing it globally is safe.
 // Only one pi process may poll a bot token at a time.
@@ -23,6 +24,8 @@ const ALLOW = new Set(cfg("PI_TELEGRAM_ALLOWED_USERS").split(",").map((x) => Num
 const INBOX = resolve(cfg("PI_TELEGRAM_INBOX", "./telegram-inbox"));
 const STATE = join(homedir(), ".pi", "agent", "telegram-state.json");
 const LOG = cfg("PI_TELEGRAM_LOG"); // optional log file path
+const SCHEDULES = join(homedir(), ".pi", "agent", "telegram-schedules.json");
+const TZ = cfg("PI_TELEGRAM_TIMEZONE", Intl.DateTimeFormat().resolvedOptions().timeZone);
 
 // Optional helpers, any OpenAI-compatible endpoint (OpenAI, Groq, OpenRouter, Sumopod, ...)
 const VISION = { url: cfg("PI_TELEGRAM_VISION_BASE_URL", "https://api.openai.com/v1"), key: cfg("PI_TELEGRAM_VISION_API_KEY"), model: cfg("PI_TELEGRAM_VISION_MODEL", "gpt-4o-mini") };
@@ -192,17 +195,128 @@ function registerTools(pi: ExtensionAPI) {
   });
 }
 
+
+// ---------- scheduler: pi works on its own and reports to Telegram ----------
+// Standard 5-field cron (minute hour day-of-month month day-of-week) in PI_TELEGRAM_TIMEZONE.
+type Schedule = { id: string; cron: string; prompt: string; chat: number; last?: string };
+
+function loadSchedules(): Schedule[] {
+  try { return JSON.parse(readFileSync(SCHEDULES, "utf8")); } catch { return []; }
+}
+function saveSchedules(s: Schedule[]) {
+  mkdirSync(join(homedir(), ".pi", "agent"), { recursive: true });
+  writeFileSync(SCHEDULES, JSON.stringify(s, null, 1));
+}
+
+function fieldMatches(field: string, value: number, min: number, max: number): boolean {
+  return field.split(",").some((part) => {
+    const [range, stepStr] = part.split("/");
+    const step = stepStr ? Number(stepStr) : 1;
+    let lo = min, hi = max;
+    if (range !== "*") {
+      const [a, b] = range.split("-").map(Number);
+      lo = a; hi = b ?? (stepStr ? max : a);
+    }
+    return value >= lo && value <= hi && (value - lo) % step === 0;
+  });
+}
+
+export function cronValid(cron: string): boolean {
+  const f = cron.trim().split(/\s+/);
+  return f.length === 5 && f.every((x) => /^(\*|\d+(-\d+)?)(\/\d+)?(,(\*|\d+(-\d+)?)(\/\d+)?)*$/.test(x));
+}
+
+export function cronMatches(cron: string, d: Date, tz = TZ): boolean {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: tz, hour12: false, minute: "numeric", hour: "numeric", day: "numeric", month: "numeric", weekday: "short" })
+    .formatToParts(d).map((x) => [x.type, x.value]));
+  const dow = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.weekday);
+  const [mi, h, dom, mon, dw] = cron.trim().split(/\s+/);
+  const dowOk = fieldMatches(dw, dow, 0, 6) || (dow === 0 && fieldMatches(dw, 7, 0, 7));
+  return fieldMatches(mi, Number(p.minute), 0, 59) && fieldMatches(h, Number(p.hour) % 24, 0, 23) &&
+    fieldMatches(dom, Number(p.day), 1, 31) && fieldMatches(mon, Number(p.month), 1, 12) && dowOk;
+}
+
+function runDue(pi: ExtensionAPI) {
+  const now = new Date();
+  const minute = now.toISOString().slice(0, 16);
+  const all = loadSchedules();
+  let changed = false;
+  for (const s of all) {
+    if (s.last === minute || !cronMatches(s.cron, now)) continue;
+    s.last = minute; changed = true;
+    st.chat = s.chat; st.fromTelegram = true;
+    log(`schedule ${s.id} fired`);
+    const msg = `[Scheduled task ${s.id}, cron "${s.cron}"] ${s.prompt}`;
+    try {
+      if (st.ctx?.isIdle()) pi.sendUserMessage(msg);
+      else pi.sendUserMessage(msg, { deliverAs: "followUp" });
+    } catch (e) { log(`schedule inject error ${e}`); }
+  }
+  if (changed) saveSchedules(all);
+}
+
+function registerScheduleTools(pi: ExtensionAPI) {
+  const ok = (text: string) => ({ content: [{ type: "text", text }], details: {} });
+  pi.registerTool({
+    name: "schedule_add",
+    label: "Schedule task",
+    description: `Schedule a recurring task: at each cron match, the prompt is sent to this pi session and the answer goes to the user's Telegram. Cron is 5 fields (minute hour day month weekday) in ${TZ}.`,
+    promptSnippet: "Schedule recurring tasks that report to the user's Telegram",
+    promptGuidelines: [
+      `Use schedule_add when the user asks for something to happen regularly or later (e.g. "every Monday 8am", "daily at 17:00"); times are in ${TZ}. Write the prompt so it is self-contained, since it runs later without this conversation.`,
+    ],
+    parameters: Type.Object({
+      cron: Type.String({ description: "5-field cron, e.g. '0 8 * * 1' = Mondays 08:00" }),
+      prompt: Type.String({ description: "What pi should do each time, self-contained" }),
+    }),
+    async execute(_id: string, params: any) {
+      if (!cronValid(params.cron)) return ok(`Invalid cron "${params.cron}". Use 5 fields: minute hour day month weekday.`);
+      const chat = st.chat || [...ALLOW][0];
+      const all = loadSchedules();
+      const id = Math.random().toString(36).slice(2, 7);
+      all.push({ id, cron: params.cron.trim(), prompt: params.prompt, chat });
+      saveSchedules(all);
+      log(`schedule ${id} added: ${params.cron}`);
+      return ok(`Scheduled ${id}: "${params.cron}" (${TZ}). Results go to Telegram chat ${chat}.`);
+    },
+  });
+  pi.registerTool({
+    name: "schedule_list",
+    label: "List schedules",
+    description: "List the recurring tasks scheduled with schedule_add.",
+    parameters: Type.Object({}),
+    async execute() {
+      const all = loadSchedules();
+      return ok(all.length ? all.map((s) => `${s.id} | ${s.cron} | ${s.prompt}`).join("\n") : "No schedules.");
+    },
+  });
+  pi.registerTool({
+    name: "schedule_remove",
+    label: "Remove schedule",
+    description: "Remove a scheduled task by id.",
+    parameters: Type.Object({ id: Type.String() }),
+    async execute(_id: string, params: any) {
+      const all = loadSchedules();
+      const rest = all.filter((s) => s.id !== params.id);
+      saveSchedules(rest);
+      return ok(rest.length < all.length ? `Removed ${params.id}.` : `No schedule ${params.id}.`);
+    },
+  });
+}
+
 // ---------- extension ----------
 export default function (pi: ExtensionAPI) {
   if (!TOKEN) return; // idle unless configured
   registerTools(pi);
+  registerScheduleTools(pi);
 
   pi.on("session_start", async (_e, ctx) => {
     st.ctx = ctx;
     if (st.polling || !ctx.hasUI) return; // interactive/RPC sessions only; print mode (-p) must be able to exit
     if (!ALLOW.size) { ctx.ui?.notify?.("pi-telegram: set PI_TELEGRAM_ALLOWED_USERS, nobody is allowed yet", "warning"); return; }
     st.polling = true;
-    log(`start, allowed=${[...ALLOW]}`);
+    log(`start, allowed=${[...ALLOW]}, timezone=${TZ}`);
+    setInterval(() => { try { runDue(pi); } catch (e) { log(`scheduler error ${e}`); } }, 20_000);
     let offset = 0;
     try { offset = JSON.parse(readFileSync(STATE, "utf8")).offset || 0; } catch {}
     (async () => {
@@ -227,11 +341,23 @@ export default function (pi: ExtensionAPI) {
           }
           if (!text) { await send(chat.id, "Send text, a photo, a file or a voice note."); continue; }
           if (text === "/start" || text === "/help") {
-            await send(chat.id, "Connected to pi. Messages go into the open pi session (and steer it if pi is busy). /stop aborts the current run.");
+            await send(chat.id, "Connected to pi. Messages go into the open pi session (and steer it if pi is busy). /stop aborts the current run, /schedules lists recurring tasks, /unschedule <id> removes one. Ask pi to do something regularly and it schedules it.");
             continue;
           }
           const c = st.ctx;
           if (text === "/stop") { c?.abort(); await send(chat.id, "Stopped."); continue; }
+          if (text === "/schedules") {
+            const all = loadSchedules();
+            await send(chat.id, all.length ? all.map((s) => `\`${s.id}\` · \`${s.cron}\` · ${s.prompt}`).join("\n") : "No schedules yet. Just ask, e.g. \"every Monday 8am, summarise last week's sales\".");
+            continue;
+          }
+          if (text.startsWith("/unschedule")) {
+            const id = text.split(/\s+/)[1];
+            const all = loadSchedules();
+            saveSchedules(all.filter((s) => s.id !== id));
+            await send(chat.id, all.some((s) => s.id === id) ? `Removed ${id}.` : "Usage: /unschedule <id> (see /schedules)");
+            continue;
+          }
           st.chat = chat.id;
           st.fromTelegram = true;
           log(`prompt ${text.length} chars`);

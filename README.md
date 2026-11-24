@@ -11,6 +11,7 @@ Telegram bot land in that session as if you typed them, and pi's answer comes ba
 - **Files** (CSV, PDF, Excel, ...): saved to an inbox folder; pi is told the path and takes it from there.
 - **Formatted answers**: pi's Markdown is converted to Telegram formatting (bold, code, lists, links).
 - **Optional `generate_image` tool**: pi can create an image (OpenAI Images API) and send it to you.
+- **Scheduler (proactive pi)**: ask pi to do something regularly ("every Monday 8am, summarise last week's sales from orders.csv") and it schedules it with cron. Each run happens in your pi session and the result lands in Telegram. `/schedules` lists them, `/unschedule <id>` removes one.
 - `/stop` aborts the current run.
 
 ## Install
@@ -52,6 +53,7 @@ Instead of env vars you can put the same keys in `~/.pi/agent/telegram.json`:
 |---|---|---|
 | `PI_TELEGRAM_INBOX` | `./telegram-inbox` | Where photos, files and voice notes are saved |
 | `PI_TELEGRAM_LOG` | (off) | Log file path |
+| `PI_TELEGRAM_TIMEZONE` | system timezone | Timezone for schedules, e.g. `Asia/Jakarta` |
 | `PI_TELEGRAM_STT_API_KEY` | (off) | Enables voice note transcription |
 | `PI_TELEGRAM_STT_BASE_URL` | `https://api.groq.com/openai/v1` | Any OpenAI-compatible `/audio/transcriptions` |
 | `PI_TELEGRAM_STT_MODEL` | `whisper-large-v3-turbo` | |
@@ -93,7 +95,8 @@ See pi's [custom models docs](https://github.com/badlogic/pi-mono/blob/main/pack
 ## Bahasa Indonesia (ringkas)
 
 Ngobrol sama sesi pi yang lagi jalan, lewat Telegram. Kirim teks, VN, foto, atau file ke bot kamu, masuk
-ke sesi pi, jawabannya balik ke Telegram.
+ke sesi pi, jawabannya balik ke Telegram. Bisa juga minta pi kerja rutin ("tiap Senin jam 8 rangkum penjualan"),
+hasilnya dikirim otomatis ke Telegram.
 
 1. Bikin bot di @BotFather, salin token.
 2. Cek user id kamu di @userinfobot.
