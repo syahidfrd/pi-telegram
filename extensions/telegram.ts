@@ -65,8 +65,12 @@ export function tablesToCards(md: string): string {
       const cards: string[] = [];
       while (i < lines.length && lines[i].trim().startsWith("|")) {
         const row = cells(lines[i]);
-        const title = row[0]?.replace(/\*\*/g, "") || "";
-        const rest = row.slice(1).map((v, j) => (v && v !== "-" ? `${head[j + 1] || ""}: ${v}` : "")).filter(Boolean);
+        // a leading "#"/number column is folded into the title ("1. Name")
+        const numbered = /^(#|no\.?|)$/i.test(head[0] || "") && /^\d+\.?$/.test(row[0] || "");
+        const t0 = numbered ? 1 : 0;
+        const title = `${numbered ? row[0].replace(/\.$/, "") + ". " : ""}${(row[t0] || "").replace(/\*\*/g, "")}`;
+        const empty = (v: string) => !v || /^[-–—]$/.test(v);
+        const rest = row.map((v, j) => (j <= t0 || empty(v) ? "" : `${head[j] || ""}: ${v}`)).filter(Boolean);
         cards.push([`**${title}**`, ...rest].join("\n"));
         i++;
       }
