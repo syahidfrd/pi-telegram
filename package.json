@@ -1,0 +1,10 @@
+{
+  "name": "pi-telegram",
+  "version": "0.1.0",
+  "description": "Talk to your running pi coding agent session from Telegram: text, voice notes, photos and files in, formatted answers out.",
+  "keywords": ["pi-package", "pi", "telegram", "agent"],
+  "license": "MIT",
+  "author": "Firdaus Ahmad Asy Syahid",
+  "repository": { "type": "git", "url": "https://github.com/syahidfrd/pi-telegram" },
+  "pi": { "extensions": ["./extensions"] }
+}
