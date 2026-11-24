@@ -1,6 +1,6 @@
 {
   "name": "pi-telegram",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Talk to your running pi coding agent session from Telegram: text, voice notes, photos and files in, formatted answers out.",
   "keywords": ["pi-package", "pi", "telegram", "agent"],
   "license": "MIT",

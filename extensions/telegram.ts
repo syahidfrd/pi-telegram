@@ -33,7 +33,7 @@ const STT = { url: cfg("PI_TELEGRAM_STT_BASE_URL", "https://api.groq.com/openai/
 const IMAGE = { url: cfg("PI_TELEGRAM_IMAGE_BASE_URL", "https://api.openai.com/v1"), key: cfg("PI_TELEGRAM_IMAGE_API_KEY"), model: cfg("PI_TELEGRAM_IMAGE_MODEL", "gpt-image-1") };
 
 const g = globalThis as any; // survives extension rebinds on /new and /resume
-g.piTelegram ??= { polling: false, ctx: null, chat: null, fromTelegram: false };
+g.piTelegram ??= { polling: false, pi: null, ctx: null, chat: null, fromTelegram: false };
 const st = g.piTelegram;
 
 function log(msg: string) {
@@ -278,8 +278,8 @@ function runDue(pi: ExtensionAPI) {
     log(`schedule ${s.id} fired`);
     const msg = `[Scheduled task ${s.id}, cron "${s.cron}"] ${s.prompt}`;
     try {
-      if (st.ctx?.isIdle()) pi.sendUserMessage(msg);
-      else pi.sendUserMessage(msg, { deliverAs: "followUp" });
+      if (st.ctx?.isIdle()) st.pi.sendUserMessage(msg);
+      else st.pi.sendUserMessage(msg, { deliverAs: "followUp" });
     } catch (e) { log(`schedule inject error ${e}`); }
   }
   if (changed) saveSchedules(all);
@@ -337,6 +337,7 @@ function registerScheduleTools(pi: ExtensionAPI) {
 // ---------- extension ----------
 export default function (pi: ExtensionAPI) {
   if (!TOKEN) return; // idle unless configured
+  st.pi = pi; // the extension is re-created on /new, /resume, /fork: always use the latest instance
   registerTools(pi);
   registerScheduleTools(pi);
 
@@ -392,8 +393,8 @@ export default function (pi: ExtensionAPI) {
           st.fromTelegram = true;
           log(`prompt ${text.length} chars`);
           try {
-            if (c?.isIdle()) pi.sendUserMessage(`[Telegram] ${text}`);
-            else pi.sendUserMessage(`[Telegram] ${text}`, { deliverAs: "steer" });
+            if (c?.isIdle()) st.pi.sendUserMessage(`[Telegram] ${text}`);
+            else st.pi.sendUserMessage(`[Telegram] ${text}`, { deliverAs: "steer" });
           } catch (e) { log(`inject error ${e}`); await send(chat.id, `Could not reach pi: ${e}`); }
         }
       }
